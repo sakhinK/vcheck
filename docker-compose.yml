@@ -1,0 +1,46 @@
+services:
+  db:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: kkufa_visa
+      MARIADB_USER: kkufa
+      MARIADB_PASSWORD: kkufa
+    ports:
+      - "3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: kkufa
+      DB_PASSWORD: kkufa
+      DB_NAME: kkufa_visa
+      SESSION_SECRET: change-me-in-production
+      DEV_MODE: "true"
+      ORIGIN: http://localhost:3000
+      UPLOAD_DIR: /app/uploads
+      TESSDATA_PATH: /app/tessdata
+      # OCR_PROVIDER: typhoon
+      # OPENTYPHOON_API_KEY: <your-key>
+      # OPENTYPHOON_OCR_URL: https://api.opentyphoon.ai/v1/ocr
+      # OPENTYPHOON_OCR_MODEL: typhoon-ocr
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+
+volumes:
+  db_data:
+  uploads:

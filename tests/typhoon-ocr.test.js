@@ -34,3 +34,12 @@ test('extractTextFromResponse throws on empty result', () => {
   assert.throws(() => extractTextFromResponse({}), /no text/);
   assert.throws(() => extractTextFromResponse(null), /empty response/);
 });
+
+test('extractTextFromResponse decodes HTML-escaped MRZ fillers', () => {
+  const body = {
+    results: [
+      { success: true, filename: 'p1.png', message: { choices: [{ message: { content: 'P&lt;UTOERIKSSON &lt;&lt; ANNA&lt;MARIA&gt;&gt;&gt;' } }] } }
+    ]
+  };
+  assert.equal(extractTextFromResponse(body), 'P<UTOERIKSSON << ANNA<MARIA>>>');
+});

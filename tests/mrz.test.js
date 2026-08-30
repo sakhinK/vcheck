@@ -7,6 +7,7 @@ import {
   parseNameField,
   resolveTwoDigitYear,
   repairByPosition,
+  pickMrzLines,
   MrzError
 } from '../src/lib/server/business/mrz.js';
 
@@ -127,4 +128,65 @@ test('repairByPosition fixes common OCR letter/digit confusions in digit slots',
   const l2 = 'L898902C36UTO7408122F1204159ZE184226B<<<<<1O'; // "O" should be "0"
   const { line2 } = repairByPosition(l1, l2);
   assert.equal(line2[43], '0');
+});
+
+test('repairByPosition preserves alphanumeric passport and personal numbers', () => {
+  const l1 = 'P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<';
+  const l2 = 'AC55769936THA8510024M33082801409900176213<98';
+  const { line2 } = repairByPosition(l1, l2);
+  // Passport number and personal number are alphanumeric in TD3 — a letter there
+  // is real data, not an OCR misread, so it must not be letter→digit repaired.
+  assert.equal(line2.slice(0, 9), 'AC5576993');
+  assert.equal(line2.slice(28, 42), '1409900176213<');
+});
+
+test('pickMrzLines extracts the MRZ pair from a full passport OCR dump', () => {
+  const raw = `KINGDOM OF THAILAND ราชอาณาจักรไทย
+
+**Passport No. / หนังสือเดินทางเลขที่**
+AC5576993
+
+**Type / รหัส:** P
+**Country Code / ประเทศ:** THA
+
+**Surname / นามสกุล:** KHAOCHAIMaha
+**Title / Name / คำนำหน้าชื่อ / ชื่อ:** MR. SAKHIN
+**Name in Thai / ชื่อภาษาไทย:** นาย สาขิน ขาวไชยมหา
+
+**Nationality / สัญชาติ:** THAI
+**Date of Birth / วันเกิด:** 02 OCT 1985
+**Sex / เพศ:** M
+**Place of Birth / สถานที่เกิด:** KHON KAEN
+
+**Height / ส่วนสูง:** 1.78M
+
+**Date of Issue / วันที่ออก:** 29 AUG 2023
+**Date of Expiry / วันที่หมดอายุ:** 28 AUG 2033
+
+**Identification No. / เลขประจำตัวประชาชน:** 1409900176213
+
+**Issuing Authority / ออกให้โดย:** MINISTRY OF FOREIGN AFFAIRS
+**Holder's Signature / ลายมือชื่อผู้ถือหนังสือเดินทาง:**
+
+P<THAKHOACHAIMAH<<SAKHIN<<<<<<<<<<<<<
+AC55769936THA8510024M33082801409900176213<98`;
+
+  const { line1, line2 } = pickMrzLines(raw);
+  assert.equal(line1.length, 44);
+  assert.equal(line1.slice(0, 5), 'P<THA');
+  assert.equal(line2, 'AC55769936THA8510024M33082801409900176213<98');
+
+  // The two bugs this guards against: (1) MRZ line 1 losing its trailing
+  // fillers and dropping out of contention, and (2) alphanumeric passport /
+  // personal numbers being corrupted. The full parse must succeed.
+  const repaired = repairByPosition(line1, line2);
+  const mrz = parseTD3(repaired.line1, repaired.line2, new Date(2026, 0, 1));
+  assert.equal(mrz.passportNumber, 'AC5576993');
+  assert.equal(mrz.nationality, 'THA');
+  assert.equal(mrz.dob.iso, '1985-10-02');
+  assert.equal(mrz.expiry.iso, '2033-08-28');
+  assert.equal(mrz.sex, 'M');
+  assert.deepEqual(mrz.name.primary, ['KHOACHAIMAH']);
+  assert.deepEqual(mrz.name.secondary, ['SAKHIN']);
+  assert.equal(mrz.personalNumber, '1409900176213');
 });

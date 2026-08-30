@@ -41,6 +41,21 @@ function readConfig() {
 }
 
 /**
+ * OpenTyphoon's OCR model returns HTML-escaped text (e.g. `<` as `&lt;`, `>` as
+ * `&gt;`). Decode those back to the literal characters before the MRZ pipeline
+ * sees the text; otherwise every `&lt;` would become four `<` filler chars and
+ * shift the MRZ field positions, breaking the check digits.
+ */
+function decodeHtmlEntities(value) {
+  return value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+/**
  * Parse the OpenTyphoon `/v1/ocr` response body into plain text.
  * Kept pure (no network) so the parsing rules are unit-testable.
  */
@@ -64,7 +79,7 @@ export function extractTextFromResponse(result) {
         } catch {
           // Not JSON — use the raw text as-is.
         }
-        texts.push(content);
+        texts.push(decodeHtmlEntities(content));
       }
     } else if (page && page.success === false) {
       failures.push(`${page.filename || 'unknown page'}: ${page.error || 'Unknown error'}`);

@@ -274,14 +274,15 @@ export function repairByPosition(line1Raw, line2Raw) {
     return { line1: l1, line2: l2, repaired: false };
   }
 
+  // Only true digit-only slots. The passport number (0-9) and the optional-data
+  // / personal number (28-42) are ALPHANUMERIC in TD3, so a letter there is real
+  // data, never an OCR misread — repairing it would corrupt valid passports.
   const line2DigitRanges = [
-    [0, 9], // passport number
-    [9, 10], // passport check digit
+    [9, 10], // passport number check digit
     [13, 19], // date of birth
     [19, 20], // DOB check digit
     [21, 27], // expiry
     [27, 28], // expiry check digit
-    [28, 42], // personal number
     [42, 43], // personal number check digit
     [43, 44] // composite check digit
   ];
@@ -324,4 +325,69 @@ export function repairByPosition(line1Raw, line2Raw) {
   }
 
   return { line1: fixed1.join(''), line2: fixed2.join(''), repaired };
+}
+
+/**
+ * Reduce raw OCR output to legal MRZ characters. Everything that is not A-Z,
+ * 0-9 or the filler "<" (spaces, punctuation, non-Latin script, OCR artifacts)
+ * collapses to "<".
+ */
+export function stripToMrzChars(raw) {
+  return raw.toUpperCase().replace(/[^A-Z0-9<]/g, '<');
+}
+
+/**
+ * Pick the two MRZ lines out of a full-page OCR dump.
+ *
+ * OCR returns the whole passport page, so most lines are human-readable labels
+ * ("Date of Expiry", "Identification No", Thai text, …) and only two are the
+ * fixed-width MRZ. We score every sanitized line and keep the best line-1
+ * (starts with "P") and the best line-2 (a long alphanumeric run full of
+ * digits), rather than assuming the MRZ is in a fixed position.
+ *
+ * Note: the trailing "<" fillers of MRZ line 1 must NOT be trimmed before
+ * measuring length — a short name is padded with many fillers, so trimming them
+ * would drop a perfectly valid line 1 below the length threshold.
+ */
+export function pickMrzLines(rawText) {
+  const candidates = rawText
+    .split(/\r?\n/)
+    .map((l) => stripToMrzChars(l))
+    .filter((l) => l.replace(/</g, '').length > 0);
+
+  const scored = candidates.map((l) => {
+    const alnum = l.replace(/</g, '');
+    const digits = (alnum.match(/[0-9]/g) || []).length;
+    const letters = (alnum.match(/[A-Z]/g) || []).length;
+    let score = 0;
+    if (l.length >= 40) score += 30;        // near-MRZ width
+    else if (l.length >= 30) score += 15;
+    if (l.startsWith('P')) score += 25;      // line-1 signature
+    if (digits >= 15) score += 25;           // line-2 signature (many digits)
+    else if (digits >= 8) score += 10;
+    score += Math.min(alnum.length, 30);     // reward alphanumeric density
+    if (digits === 0 && letters < 15) score -= 40; // penalize filler-only labels
+    return { l, score, startsP: l.startsWith('P') };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  if (scored.length < 2) {
+    throw new MrzError(['No MRZ found in the document. The uploaded file may not be a passport data page.']);
+  }
+
+  let line1 = null;
+  let line2 = null;
+  for (const c of scored) {
+    if (!line1 && c.startsP) line1 = c.l;
+    else if (!line2 && !c.startsP) line2 = c.l;
+    if (line1 && line2) break;
+  }
+  if (!line1) line1 = scored[0].l;
+  if (!line2) line2 = scored[1].l;
+
+  return {
+    line1: line1.slice(0, 44).padEnd(44, '<'),
+    line2: line2.slice(0, 44).padEnd(44, '<')
+  };
 }

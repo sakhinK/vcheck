@@ -1,4 +1,4 @@
-import { parseTD3, repairByPosition, MrzError } from '$lib/server/business/mrz.js';
+import { parseTD3, repairByPosition, MrzError, pickMrzLines } from '$lib/server/business/mrz.js';
 
 /**
  * Server-side OCR pipeline for the passport MRZ.
@@ -14,39 +14,6 @@ import { parseTD3, repairByPosition, MrzError } from '$lib/server/business/mrz.j
  * committed under TESSDATA_PATH to be accurate; generic English models are
  * poor at the OCR-B font that the standard mandates.
  */
-
-function stripToMrzChars(raw) {
-  return raw.toUpperCase().replace(/[^A-Z0-9<]/g, '<');
-}
-
-/**
- * Pick the two most MRZ-like lines from raw OCR output. MRZ line 1 starts
- * with "P" and both lines are exactly 44 chars; OCR text is often noisy so we
- * score candidates rather than require an exact match.
- */
-export function pickMrzLines(rawText) {
-  const lines = rawText
-    .split(/\r?\n/)
-    .map((l) => stripToMrzChars(l).replace(/<+$/g, ''))
-    .filter((l) => l.length >= 30);
-
-  const scored = lines.map((l) => {
-    let score = 0;
-    if (l.startsWith('P')) score += 3;
-    if (l.includes('<<')) score += 2;
-    if (/[0-9]{4,}/.test(l)) score += 2;
-    score += Math.min(l.length, 44);
-    return { l, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-  if (scored.length < 2) {
-    throw new MrzError(['No MRZ found in the document. The uploaded file may not be a passport data page.']);
-  }
-  const line1 = scored[0].l.slice(0, 44).padEnd(44, '<');
-  const line2 = scored[1].l.slice(0, 44).padEnd(44, '<');
-  return { line1, line2 };
-}
 
 /**
  * Pick the OCR engine at runtime. Default is the offline Tesseract engine;

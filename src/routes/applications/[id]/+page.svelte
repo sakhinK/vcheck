@@ -45,6 +45,50 @@
     </div>
   {/if}
 
+  {#if data.isApplicant && data.app.name_source === 'applicant_edited'}
+    <div class="alert alert-warning mt-16">
+      <strong>You submitted with data you edited yourself.</strong>
+      The name does not match the passport MRZ. Faculty and IAD have been notified.
+      Machine-read original:
+      <span class="mono">{data.app.mrz_raw_name_primary} {data.app.mrz_raw_name_secondary}</span>
+    </div>
+  {/if}
+
+  <!-- Stay / document status for reviewers (remaining stay, expiry, insurance) -->
+  {#if isOfficer}
+    <div class="card mt-24">
+      <div class="card-title">Stay &amp; document status</div>
+      <div class="form-row-3">
+        <div class="field" style="margin-bottom:0">
+          <span class="field-label">Remaining stay in Thailand</span>
+          <div>
+            {#if data.summary.daysRemaining === null}
+              —
+            {:else if data.summary.daysRemaining >= 0}
+              <strong>{data.summary.daysRemaining} days</strong>
+            {:else}
+              <strong style="color:var(--error)">Expired {Math.abs(data.summary.daysRemaining)} days ago</strong>
+            {/if}
+          </div>
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <span class="field-label">Passport expiry</span>
+          <div>
+            {data.summary.passportExpiry}
+            {#if data.summary.passportExpired}<span class="chip chip-error">expired</span>{/if}
+          </div>
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <span class="field-label">Insurance end</span>
+          <div>
+            {data.summary.insuranceEnd}
+            {#if data.summary.insuranceExpired}<span class="chip chip-error">expired</span>{/if}
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
+
   <!-- Action panel: current status actions first (per design) -->
   <div class="card mt-24">
     <div class="card-title">Action</div>

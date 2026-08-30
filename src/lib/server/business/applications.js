@@ -1,6 +1,8 @@
 import pool, { withTransaction } from '$lib/server/db/index.js';
 import { BusinessError } from '$lib/server/business/registry.js';
 import { ROLES } from '$lib/server/auth/index.js';
+import { isPast } from '$lib/server/business/dates.js';
+import { notifyNameEdited } from '$lib/server/business/notifications.js';
 import {
   canTransition,
   transitionRequirement,
@@ -68,7 +70,8 @@ async function hasSignedDocument(conn, applicationId, docType) {
  */
 export async function createApplication({ studentId, dataVersionId, createdBy }) {
   return withTransaction(async (conn) => {
-    await conn.query('SELECT id FROM students WHERE id = ? FOR UPDATE', [studentId]);
+    const [stu] = await conn.query('SELECT id, first_name, last_name FROM students WHERE id = ? FOR UPDATE', [studentId]);
+    const student = stu[0];
 
     const [existing] = await conn.query(
       "SELECT application_no FROM applications WHERE student_id = ? AND status NOT IN ('completed','terminated') LIMIT 1",
@@ -85,6 +88,10 @@ export async function createApplication({ studentId, dataVersionId, createdBy })
       throw new BusinessError('You must confirm the passport name before submitting.');
     }
 
+    if (isPast(version.passport_expiry_date)) {
+      throw new BusinessError('This passport has expired and cannot be used to submit a visa extension request. Please scan a valid passport into a new data version.');
+    }
+
     const missing = await missingRequiredDocs(conn, dataVersionId);
     if (missing.length > 0) {
       throw new BusinessError(`Missing required document(s): ${missing.join(', ')}.`);
@@ -98,6 +105,18 @@ export async function createApplication({ studentId, dataVersionId, createdBy })
     );
     const applicationId = res.insertId;
     await addAudit(conn, applicationId, 1, null, 'pending', { id: createdBy, role: ROLES.student }, 'Application submitted', true);
+
+    // Surface applicant-edited identity data (rule 5): notify every reviewer
+    // so faculty and IAD see the deviation proactively, not only when they open
+    // the application.
+    if (version.name_source === 'applicant_edited') {
+      await notifyNameEdited(conn, {
+        applicationId,
+        applicationNo,
+        studentName: `${student.first_name} ${student.last_name}`
+      });
+    }
+
     return { applicationId, applicationNo };
   });
 }

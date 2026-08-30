@@ -3,6 +3,7 @@ import { getStudentForUser } from '$lib/server/business/registry.js';
 import { listVersions } from '$lib/server/business/version.js';
 import { requiredDocsChecklist } from '$lib/server/business/documents.js';
 import { createApplication } from '$lib/server/business/applications.js';
+import { isPast } from '$lib/server/business/dates.js';
 
 export async function load({ locals }) {
   const user = locals.user;
@@ -15,11 +16,14 @@ export async function load({ locals }) {
   const ready = [];
   for (const v of versions) {
     if (v.status !== 'draft') continue;
+    if (v.application_id) continue; // already used by an application
     const checklist = await requiredDocsChecklist(v.id);
     ready.push({
       ...v,
       nameCertified: v.name_certified === 1,
-      allDocs: checklist.every((c) => c.present)
+      allDocs: checklist.every((c) => c.present),
+      nameEdited: v.name_source === 'applicant_edited',
+      passportExpired: isPast(v.passport_expiry_date)
     });
   }
   return { user, student, versions: ready };

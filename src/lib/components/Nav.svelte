@@ -36,6 +36,14 @@
       </span>
       {#if devMode}
         <a class="btn btn-ghost btn-sm" href="/auth/dev-login">Switch user</a>
+        <form
+          method="POST"
+          action="/dev/reset"
+          style="margin:0"
+          on:submit={(e) => { if (!confirm('Reset all demo data? Applications, data versions, documents and notifications will be cleared.')) e.preventDefault(); }}
+        >
+          <button class="btn btn-ghost btn-sm" type="submit">Reset demo data</button>
+        </form>
       {/if}
       <form method="POST" action="/auth/logout" style="margin:0">
         <button class="btn btn-ghost btn-sm" type="submit">Log out</button>

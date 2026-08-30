@@ -6,23 +6,54 @@ import {
   certifyName,
   officerEditName,
   getNameEdits,
-  updateVersionDraft
+  updateVersionDraft,
+  getVersionApplication,
+  deleteVersion
 } from '$lib/server/business/version.js';
 import {
   attachVersionDocument,
   requiredDocsChecklist,
   listVersionDocuments
 } from '$lib/server/business/documents.js';
-import { parseTD3 } from '$lib/server/business/mrz.js';
+import { parseTD3, checkDigit } from '$lib/server/business/mrz.js';
 import { scanPassportImage } from '$lib/server/business/mrz-ocr.js';
 import { ROLES } from '$lib/server/auth/index.js';
+import { isPast } from '$lib/server/business/dates.js';
 
-// Published specimen from ICAO 9303 — the dev "scan specimen" action runs it
-// through the full server-side scan/verify path so the flow works without an
-// OCR model committed yet.
+// Dev "scan specimen" runs the published ICAO 9303 specimen fields through the
+// full server-side parse/verify path. The expiry is set to a future date
+// (2033-12-31) so the expired-passport rule never blocks the offline happy
+// path; every check digit is recomputed to keep the MRZ valid.
+function buildSpecimenLine2({ passportNumber = 'L898902C3', dobField = '740812', expiryField } = {}) {
+  const nationality = 'UTO';
+  const sex = 'F';
+  const personalField = 'ZE184226B<<<<<';
+  const passportCheck = checkDigit(passportNumber);
+  const dobCheck = checkDigit(dobField);
+  const expiryCheck = checkDigit(expiryField);
+  const personalCheck = checkDigit(personalField);
+  const composite = checkDigit(
+    passportNumber + passportCheck + dobField + dobCheck + expiryField + expiryCheck + personalField + personalCheck
+  );
+  return passportNumber + passportCheck + nationality + dobField + dobCheck + sex + expiryField + expiryCheck + personalField + personalCheck + composite;
+}
+
 const SPECIMEN = {
   line1: 'P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<',
-  line2: 'L898902C36UTO7408122F1204159ZE184226B<<<<<10'
+  line2: buildSpecimenLine2({ expiryField: '331231' }) // expiry 2033-12-31
+};
+
+// Offline dev "misread" specimen: same name, but the three check-digit-protected
+// identity fields (passport number, date of birth, expiry) are deliberately wrong.
+// The check digits are recomputed so it still passes server-side verification —
+// this simulates an OCR read that produced a wrong-but-internally-consistent value.
+const MISREAD_SPECIMEN = {
+  line1: 'P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<',
+  line2: buildSpecimenLine2({
+    passportNumber: 'L898902C4',
+    dobField: '750812',
+    expiryField: '341231' // expiry 2034-12-31
+  })
 };
 
 async function loadVersion(user, id) {
@@ -40,11 +71,18 @@ export async function load({ locals, params }) {
   const checklist = await requiredDocsChecklist(version.id);
   const documents = await listVersionDocuments(version.id);
   const nameEdits = await getNameEdits(version.id);
+  const application = await getVersionApplication(version.id);
   const canEditDraft = version.status === 'draft';
   const isOfficer = [ROLES.faculty, ROLES.iad].includes(user.role);
+  const canDelete =
+    version.status === 'draft' &&
+    !application &&
+    (student.user_id === user.id || isOfficer);
+  const passportExpired = isPast(version.passport_expiry_date);
   return {
-    user, version, student, checklist, documents, nameEdits, canEditDraft,
-    isOfficer, devMode: process.env.DEV_MODE === 'true'
+    user, version, student, checklist, documents, nameEdits, application,
+    canEditDraft, isOfficer, canDelete, passportExpired,
+    devMode: process.env.DEV_MODE === 'true'
   };
 }
 
@@ -65,7 +103,13 @@ export const actions = {
         mimeType: file.type || 'application/octet-stream'
       });
       await applyScanToVersion(version.id, mrz, user.id);
-      return { scanOk: true, warnings: mrz.warnings, rawMrz: mrz.rawMrz };
+
+      const passportExpired = Boolean(mrz.expiry.iso && isPast(mrz.expiry.iso));
+      const warnings = [...(mrz.warnings || [])];
+      if (passportExpired) {
+        warnings.push(`This passport expired on ${mrz.expiry.iso}. It cannot be used to submit a visa extension request.`);
+      }
+      return { scanOk: true, warnings, passportExpired, rawMrz: mrz.rawMrz };
     } catch (err) {
       // The uploaded file is never persisted on failure (rule 2).
       return fail(400, { scanError: err.message });
@@ -79,7 +123,33 @@ export const actions = {
     const { version } = await loadVersion(user, params.id);
     const mrz = parseTD3(SPECIMEN.line1, SPECIMEN.line2);
     await applyScanToVersion(version.id, mrz, user.id);
-    return { scanOk: true, warnings: mrz.warnings, specimen: true, rawMrz: { line1: SPECIMEN.line1, line2: SPECIMEN.line2 } };
+    return {
+      scanOk: true,
+      warnings: mrz.warnings,
+      passportExpired: false,
+      specimen: true,
+      rawMrz: { line1: SPECIMEN.line1, line2: SPECIMEN.line2 }
+    };
+  },
+
+  scanSpecimenMisread: async ({ locals, params }) => {
+    if (process.env.DEV_MODE !== 'true') throw error(404, 'Not found');
+    const user = locals.user;
+    if (!user) throw redirect(303, '/');
+    const { version } = await loadVersion(user, params.id);
+    const mrz = parseTD3(MISREAD_SPECIMEN.line1, MISREAD_SPECIMEN.line2);
+    await applyScanToVersion(version.id, mrz, user.id, { misread: true });
+    return {
+      scanOk: true,
+      warnings: [
+        ...mrz.warnings,
+        'DEV ONLY: simulated a misread — passport number, date of birth and expiry were altered from the ICAO specimen.'
+      ],
+      passportExpired: false,
+      specimen: true,
+      misread: true,
+      rawMrz: { line1: MISREAD_SPECIMEN.line1, line2: MISREAD_SPECIMEN.line2 }
+    };
   },
 
   certifyName: async ({ request, locals, params }) => {
@@ -158,6 +228,21 @@ export const actions = {
     } catch (err) {
       return fail(400, { docError: err.message });
     }
+  },
+
+  deleteVersion: async ({ locals, params }) => {
+    const user = locals.user;
+    if (!user) throw redirect(303, '/');
+    const { version, student } = await loadVersion(user, params.id);
+    const isStudentOwner = user.role === ROLES.student && student.user_id === user.id;
+    const isOfficer = [ROLES.faculty, ROLES.iad].includes(user.role);
+    if (!isStudentOwner && !isOfficer) throw error(403, 'You cannot delete this data version.');
+    try {
+      await deleteVersion(version.id);
+    } catch (err) {
+      return fail(400, { deleteError: err.message });
+    }
+    throw redirect(303, isStudentOwner ? '/profile' : `/students/${student.id}`);
   }
 };
 

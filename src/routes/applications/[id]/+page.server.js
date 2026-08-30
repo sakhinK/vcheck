@@ -13,6 +13,7 @@ import { listVersionDocuments } from '$lib/server/business/documents.js';
 import { attachApplicationDocument } from '$lib/server/business/documents.js';
 import { availableActions, STATUS_LABELS, PUBLIC_MILESTONES, milestoneIndex } from '$lib/server/business/workflow.js';
 import { ROLES } from '$lib/server/auth/index.js';
+import { isPast, daysFromToday, formatDate } from '$lib/server/business/dates.js';
 
 async function loadApp(user, id) {
   const app = await getApplication(id);
@@ -42,8 +43,16 @@ export async function load({ locals, params }) {
   const advisors =
     user.role === ROLES.faculty || user.role === ROLES.iad ? await listAdvisors() : [];
 
+  const summary = {
+    daysRemaining: daysFromToday(app.visa_last_allowed_date),
+    passportExpiry: formatDate(app.passport_expiry_date),
+    insuranceEnd: formatDate(app.insurance_end_date),
+    passportExpired: isPast(app.passport_expiry_date),
+    insuranceExpired: isPast(app.insurance_end_date)
+  };
+
   return {
-    user, app, audit, docs, versionDocs, nameEdits, actions, advisors,
+    user, app, audit, docs, versionDocs, nameEdits, actions, advisors, summary,
     isApplicant, statusLabels: STATUS_LABELS,
     milestones: PUBLIC_MILESTONES, currentMilestone: milestoneIndex(app.status)
   };

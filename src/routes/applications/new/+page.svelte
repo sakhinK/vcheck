@@ -26,11 +26,24 @@
           <span class="chip {v.allDocs ? 'chip-success' : 'chip-warning'}">{v.allDocs ? 'docs complete' : 'docs missing'}</span>
         </div>
       </div>
+      {#if v.nameEdited}
+        <div class="alert alert-warning mt-16">
+          <strong>You are submitting with data you edited yourself.</strong>
+          The name differs from the passport MRZ. Faculty and IAD will be notified.
+        </div>
+      {/if}
+      {#if v.passportExpired}
+        <div class="alert alert-error mt-16">This passport has expired and cannot be used to submit a request.</div>
+      {/if}
       {#if v.nameCertified && v.allDocs}
-        <form method="POST" class="mt-16">
-          <input type="hidden" name="versionId" value={v.id} />
-          <button class="btn btn-primary" type="submit">Submit with this version</button>
-        </form>
+        {#if v.passportExpired}
+          <p class="caption mt-16">This version cannot be submitted because the passport has expired. Scan a valid passport into a new data version.</p>
+        {:else}
+          <form method="POST" class="mt-16">
+            <input type="hidden" name="versionId" value={v.id} />
+            <button class="btn btn-primary" type="submit">Submit with this version</button>
+          </form>
+        {/if}
       {:else}
         <a class="btn btn-secondary mt-16" href="/versions/{v.id}">Complete this version</a>
       {/if}

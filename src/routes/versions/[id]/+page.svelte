@@ -5,11 +5,37 @@
   export let data;
   export let form;
 
+  const isStudentSelf =
+    data.user.role === 'international_student' &&
+    data.student.user_id === data.user.id;
+
   const nameSourceLabel = {
     mrz: 'Read from MRZ',
     applicant_edited: 'Edited by applicant',
     officer_edited: 'Corrected by officer'
   };
+  
+
+  let primary = data.version.name_primary || '';
+  let secondary = data.version.name_secondary || '';
+  let serverPrimary = data.version.name_primary || '';
+  let serverSecondary = data.version.name_secondary || '';
+
+  $: if (data.version.name_primary !== serverPrimary) {
+    serverPrimary = data.version.name_primary;
+    primary = data.version.name_primary || '';
+  }
+  $: if (data.version.name_secondary !== serverSecondary) {
+    serverSecondary = data.version.name_secondary;
+    secondary = data.version.name_secondary || '';
+  }
+
+  $: nameEdited =
+    primary.trim() !== (data.version.mrz_raw_name_primary || '') ||
+    secondary.trim() !== (data.version.mrz_raw_name_secondary || '');
+
+  $: mrzMisread = !!data.version.mrz_misread;
+
 
   let scanning = false;
   let preview = null;
@@ -46,11 +72,15 @@
         <span class="chip {data.version.status === 'draft' ? 'chip-warning' : 'chip-neutral'}">{data.version.status}</span>
       </p>
     </div>
-    <a class="btn btn-ghost" href="/students/{data.student.id}">Back to student</a>
+    <a class="btn btn-ghost" href={isStudentSelf ? '/profile' : `/students/${data.student.id}`}>{isStudentSelf ? 'Back to my data' : 'Back to student'}</a>
   </div>
 
   {#if !data.canEditDraft}
     <div class="alert alert-info">This version is locked because an application using it reached a terminal status.</div>
+  {/if}
+
+  {#if data.passportExpired}
+    <div class="alert alert-error">This passport has expired and cannot be used to submit a visa extension request.</div>
   {/if}
 
   <!-- Passport scan -->
@@ -63,7 +93,11 @@
 
     {#if form?.scanError}<div class="alert alert-error">{form.scanError}</div>{/if}
     {#if form?.scanOk}
-      <div class="alert alert-success">Passport scanned and verified. All MRZ check digits passed.</div>
+      {#if form?.misread}
+        <div class="alert alert-warning">Passport scanned — <strong>DEV misread simulated</strong>. Check digits still pass, but the identity values are deliberately wrong.</div>
+      {:else}
+        <div class="alert alert-success">Passport scanned and verified. All MRZ check digits passed.</div>
+      {/if}
     {/if}
     {#if form?.warnings?.length}
       <div class="alert alert-warning">
@@ -108,10 +142,17 @@
           </button>
         </form>
         {#if data.devMode}
-          <form method="POST" action="?/scanSpecimen">
+          <div>
             <div class="field"><label>Offline dev</label></div>
-            <button class="btn btn-secondary" type="submit">Scan ICAO specimen (dev)</button>
-          </form>
+            <div class="flex gap-16" style="flex-wrap:wrap">
+              <form method="POST" action="?/scanSpecimen">
+                <button class="btn btn-secondary" type="submit">Scan ICAO specimen (dev)</button>
+              </form>
+              <form method="POST" action="?/scanSpecimenMisread">
+                <button class="btn btn-secondary" type="submit">Simulate MRZ misread (dev)</button>
+              </form>
+            </div>
+          </div>
         {/if}
       </div>
     {/if}
@@ -126,9 +167,9 @@
     {#if data.version.passport_number}
       <div class="divider"></div>
       <div class="form-row-3">
-        <div class="field"><label>Passport number</label><div class="mono"><span class="chip chip-success">verified</span> {data.version.passport_number}</div></div>
-        <div class="field"><label>Date of birth</label><div><span class="chip chip-success">verified</span> {data.version.date_of_birth}</div></div>
-        <div class="field"><label>Expiry</label><div><span class="chip chip-success">verified</span> {data.version.passport_expiry_date}</div></div>
+        <div class="field"><label>Passport number</label><div class="mono"><span class="chip {mrzMisread ? 'chip-warning' : 'chip-success'}">{mrzMisread ? 'misread (dev)' : 'verified'}</span> {data.version.passport_number}</div></div>
+        <div class="field"><label>Date of birth</label><div><span class="chip {mrzMisread ? 'chip-warning' : 'chip-success'}">{mrzMisread ? 'misread (dev)' : 'verified'}</span> {data.version.date_of_birth}</div></div>
+        <div class="field"><label>Expiry</label><div><span class="chip {mrzMisread ? 'chip-warning' : 'chip-success'}">{mrzMisread ? 'misread (dev)' : 'verified'}</span> {data.version.passport_expiry_date}</div></div>
       </div>
       <div class="form-row-3">
         <div class="field"><label>Nationality</label><div><span class="chip chip-neutral">not protected</span> {data.version.nationality}</div></div>
@@ -136,6 +177,13 @@
         <div class="field"><label>Issue date (manual)</label><div>{data.version.passport_issue_date || '—'}</div></div>
       </div>
       <p class="caption">Fields marked <em>not protected</em> are not covered by any MRZ check digit, so they are shown without a "verified" mark (rule 3).</p>
+      {#if mrzMisread}
+        <p class="caption" style="color:var(--warning)">
+          <strong>Dev simulation:</strong> the passport number, date of birth and expiry above are
+          intentionally wrong (simulated OCR misread). Their check digits still pass, so without this
+          dev marker they would look "verified".
+        </p>
+      {/if}
     {/if}
   </div>
 
@@ -157,13 +205,20 @@
       <div class="form-row">
         <div class="field">
           <label>Primary identifier (surname)</label>
-          <input class="input" name="primary" value={data.version.name_primary || ''} disabled={data.version.name_certified === 1 && !data.isOfficer} />
+          <input class="input" name="primary" bind:value={primary} disabled={data.version.name_certified === 1 && !data.isOfficer} />
         </div>
         <div class="field">
           <label>Secondary identifier (given names)</label>
-          <input class="input" name="secondary" value={data.version.name_secondary || ''} disabled={data.version.name_certified === 1 && !data.isOfficer} />
+          <input class="input" name="secondary" bind:value={secondary} disabled={data.version.name_certified === 1 && !data.isOfficer} />
         </div>
       </div>
+      {#if isStudentSelf && data.canEditDraft && data.version.name_certified !== 1 && nameEdited}
+        <div class="alert alert-warning mt-16">
+          You are editing the name that was read from the MRZ. Please note that if the edited
+          name does not match the uploaded passport image, this request may be rejected and the
+          approval process may take longer.
+        </div>
+      {/if}
       {#if data.canEditDraft && data.version.name_certified !== 1}
         <label class="flex gap-8" style="align-items:flex-start">
           <input type="checkbox" name="certified" value="true" style="margin-top:3px" />
@@ -251,6 +306,17 @@
       {/each}
     </ul>
   </div>
+
+  {#if data.canDelete}
+    <div class="card mt-24" style="border-color:var(--error)">
+      <div class="card-title" style="color:var(--error)">Delete this data version</div>
+      {#if form?.deleteError}<div class="alert alert-error">{form.deleteError}</div>{/if}
+      <p class="caption">This draft is unused, so it can be deleted. Its uploaded documents are removed permanently.</p>
+      <form method="POST" action="?/deleteVersion" on:submit={(e) => { if (!confirm('Delete this data version and its documents?')) e.preventDefault(); }}>
+        <button class="btn btn-danger" type="submit">Delete data version</button>
+      </form>
+    </div>
+  {/if}
 </div>
 
 <style>

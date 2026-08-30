@@ -1,5 +1,7 @@
+import { unlink } from 'node:fs/promises';
 import pool from '$lib/server/db/index.js';
 import { BusinessError } from '$lib/server/business/registry.js';
+import { listVersionDocuments, absoluteUploadPath } from '$lib/server/business/documents.js';
 
 const joinName = (parts) => (parts || []).filter(Boolean).join(' ');
 
@@ -14,11 +16,62 @@ export async function getVersion(id) {
 }
 
 export async function listVersions(studentId) {
+  // Include the linked application (if any) so the UI can distinguish a draft
+  // that is still unused from a version currently under review / finished.
   const [rows] = await pool.query(
-    'SELECT * FROM data_versions WHERE student_id = ? ORDER BY version_no DESC',
+    `SELECT v.*,
+       (SELECT a.id FROM applications a WHERE a.data_version_id = v.id ORDER BY a.id DESC LIMIT 1) AS application_id,
+       (SELECT a.application_no FROM applications a WHERE a.data_version_id = v.id ORDER BY a.id DESC LIMIT 1) AS application_no,
+       (SELECT a.status FROM applications a WHERE a.data_version_id = v.id ORDER BY a.id DESC LIMIT 1) AS application_status
+     FROM data_versions v
+     WHERE v.student_id = ?
+     ORDER BY v.version_no DESC`,
     [studentId]
   );
   return rows;
+}
+
+/** The most recently created data version for a student, or null. */
+export async function getLatestVersion(studentId) {
+  const [rows] = await pool.query(
+    'SELECT * FROM data_versions WHERE student_id = ? ORDER BY version_no DESC LIMIT 1',
+    [studentId]
+  );
+  return rows[0] || null;
+}
+
+/** The application that uses this version (most recent), or null. */
+export async function getVersionApplication(versionId) {
+  const [rows] = await pool.query(
+    'SELECT id, application_no, status FROM applications WHERE data_version_id = ? ORDER BY id DESC LIMIT 1',
+    [versionId]
+  );
+  return rows[0] || null;
+}
+
+/**
+ * Delete an *unused* draft data version. Refuses a version that is locked or
+ * already referenced by an application. Uploaded files are removed first; the
+ * DB rows cascade from the data_versions delete.
+ */
+export async function deleteVersion(versionId) {
+  const v = await getVersion(versionId);
+  if (!v) throw new BusinessError('Data version not found.', 404);
+  if (v.status !== 'draft') throw new BusinessError('Only draft data versions can be deleted.');
+
+  const [apps] = await pool.query('SELECT id FROM applications WHERE data_version_id = ? LIMIT 1', [versionId]);
+  if (apps[0]) throw new BusinessError('This data version is used by an application and cannot be deleted.');
+
+  const docs = await listVersionDocuments(versionId);
+  for (const d of docs) {
+    try {
+      await unlink(absoluteUploadPath(d.file_path));
+    } catch {
+      // File already missing — nothing to clean up.
+    }
+  }
+
+  await pool.query('DELETE FROM data_versions WHERE id = ?', [versionId]);
 }
 
 /** Start a new draft data version for a student. */
@@ -60,7 +113,7 @@ export async function updateVersionDraft(versionId, fields) {
  * sex — a form can never reach it. (Rule 1: identity data comes only from a
  * server-verified scan.)
  */
-export async function applyScanToVersion(versionId, mrz, createdBy) {
+export async function applyScanToVersion(versionId, mrz, createdBy, { misread = false } = {}) {
   await pool.query(
     `UPDATE data_versions SET
        passport_number = ?,
@@ -74,6 +127,7 @@ export async function applyScanToVersion(versionId, mrz, createdBy) {
        mrz_raw_name_primary = ?,
        mrz_raw_name_secondary = ?,
        dates_incomplete = ?,
+       mrz_misread = ?,
        updated_at = NOW()
      WHERE id = ? AND status = 'draft'`,
     [
@@ -87,6 +141,7 @@ export async function applyScanToVersion(versionId, mrz, createdBy) {
       joinName(mrz.name.primary),
       joinName(mrz.name.secondary),
       mrz.dob.complete && mrz.expiry.complete ? 0 : 1,
+      misread ? 1 : 0,
       versionId
     ]
   );

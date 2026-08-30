@@ -18,7 +18,7 @@
 
 <header class="nav">
   <a class="nav-logo" href="/">
-    <img src="/kkulogo/1. official logo 2022-03.png" alt="KKU" />
+    <img src="/kkulogo/1. official logo 2022-26.png" alt="KKU" />
     <span>IAD Visa Desk</span>
   </a>
 

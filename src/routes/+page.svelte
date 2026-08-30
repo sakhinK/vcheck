@@ -15,7 +15,7 @@
   </div>
 {:else}
   <div class="hero">
-    <img src="/kkulogo/1. official logo 2022-03.png" alt="KKU" style="height:72px" />
+    <img src="/kkulogo/1. official logo 2022-26.png" alt="KKU" style="height:72px" />
     <h1>Visa extension requests, from submission to the Immigration Bureau</h1>
     <p class="muted">
       For international students of Khon Kaen University. Track your request,

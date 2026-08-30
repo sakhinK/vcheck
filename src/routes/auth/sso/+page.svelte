@@ -7,7 +7,7 @@
 <div class="container" style="max-width:440px;padding-top:64px">
   <div class="card">
     <div class="text-center" style="margin-bottom:24px">
-      <img src="/kkulogo/1. official logo 2022-03.png" alt="KKU" style="height:56px" />
+      <img src="/kkulogo/1. official logo 2022-26.png" alt="KKU" style="height:56px" />
       <h2 style="margin-top:12px">KKU Single Sign-On</h2>
       <p class="muted">Mock consent screen (offline).</p>
     </div>

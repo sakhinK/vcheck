@@ -1,4 +1,7 @@
 <script>
+  import { enhance } from '$app/forms';
+  import { onMount } from 'svelte';
+
   export let data;
   export let form;
 
@@ -7,6 +10,28 @@
     applicant_edited: 'Edited by applicant',
     officer_edited: 'Corrected by officer'
   };
+
+  let scanning = false;
+  let preview = null;
+
+  function handleFileSelect(event) {
+    const file = event.currentTarget.files && event.currentTarget.files[0];
+    if (!file) {
+      if (preview?.url) URL.revokeObjectURL(preview.url);
+      preview = null;
+      return;
+    }
+    const isImage = !!file.type && file.type.startsWith('image/');
+    const url = isImage ? URL.createObjectURL(file) : null;
+    if (preview?.url) URL.revokeObjectURL(preview.url);
+    preview = { url, name: file.name, isImage };
+  }
+
+  onMount(() => {
+    return () => {
+      if (preview?.url) URL.revokeObjectURL(preview.url);
+    };
+  });
 </script>
 
 <svelte:head><title>Data version v{data.version.version_no}</title></svelte:head>
@@ -48,12 +73,39 @@
 
     {#if data.canEditDraft}
       <div class="flex gap-16" style="align-items:flex-start;flex-wrap:wrap">
-        <form method="POST" action="?/scanPassport" enctype="multipart/form-data">
+        <form
+          method="POST"
+          action="?/scanPassport"
+          enctype="multipart/form-data"
+          use:enhance={() => {
+            scanning = true;
+            return async ({ update }) => {
+              await update({ reset: false });
+              scanning = false;
+            };
+          }}
+        >
           <div class="field">
             <label>Upload passport data page (image/PDF)</label>
-            <input class="input" type="file" name="file" accept="image/*,application/pdf" required />
+            <input class="input" type="file" name="file" accept="image/*,application/pdf" required on:change={handleFileSelect} />
           </div>
-          <button class="btn btn-primary" type="submit">Scan &amp; verify</button>
+
+          {#if preview}
+            <div class="passport-preview">
+              {#if preview.isImage}
+                <img src={preview.url} alt="Selected passport page preview" />
+              {:else}
+                <div class="passport-preview-fallback">
+                  <span class="muted">PDF preview is not available</span>
+                </div>
+              {/if}
+              <p class="caption">Selected: {preview.name}</p>
+            </div>
+          {/if}
+
+          <button class="btn btn-primary" type="submit" disabled={scanning}>
+            {#if scanning}<span class="spinner" aria-hidden="true"></span> Scanning…{:else}Scan &amp; verify{/if}
+          </button>
         </form>
         {#if data.devMode}
           <form method="POST" action="?/scanSpecimen">
@@ -62,6 +114,13 @@
           </form>
         {/if}
       </div>
+    {/if}
+
+    {#if form?.rawMrz}
+      <details class="mrz-raw">
+        <summary>Raw MRZ data (click to expand)</summary>
+        <pre class="mono">{`Line 1: ${form.rawMrz.line1}\nLine 2: ${form.rawMrz.line2}`}</pre>
+      </details>
     {/if}
 
     {#if data.version.passport_number}
@@ -193,3 +252,67 @@
     </ul>
   </div>
 </div>
+
+<style>
+  .spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: mrz-spin 0.7s linear infinite;
+    flex: none;
+  }
+  @keyframes mrz-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .passport-preview {
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 12px;
+    background: var(--surface);
+  }
+  .passport-preview img {
+    display: block;
+    max-width: 100%;
+    max-height: 320px;
+    object-fit: contain;
+    border-radius: var(--radius-md);
+    margin-bottom: 8px;
+  }
+  .passport-preview-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 120px;
+    background: var(--background);
+    border-radius: var(--radius-md);
+    margin-bottom: 8px;
+  }
+
+  .mrz-raw {
+    margin-top: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+  }
+  .mrz-raw summary {
+    cursor: pointer;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+  .mrz-raw pre {
+    margin: 0;
+    padding: 12px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--background);
+    font-size: 13px;
+    line-height: 1.7;
+    overflow-x: auto;
+    white-space: pre;
+  }
+</style>

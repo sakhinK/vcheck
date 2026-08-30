@@ -39,7 +39,11 @@ export async function scanPassportImage(buffer, meta = {}) {
   const raw = await runOcrForEngine(buffer, meta);
   const { line1, line2 } = pickMrzLines(raw);
   const repaired = repairByPosition(line1, line2);
-  return parseTD3(repaired.line1, repaired.line2);
+  const parsed = parseTD3(repaired.line1, repaired.line2);
+  return {
+    ...parsed,
+    rawMrz: { line1: repaired.line1, line2: repaired.line2 }
+  };
 }
 
 export { MrzError };

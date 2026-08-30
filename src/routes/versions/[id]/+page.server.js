@@ -65,7 +65,7 @@ export const actions = {
         mimeType: file.type || 'application/octet-stream'
       });
       await applyScanToVersion(version.id, mrz, user.id);
-      return { scanOk: true, warnings: mrz.warnings };
+      return { scanOk: true, warnings: mrz.warnings, rawMrz: mrz.rawMrz };
     } catch (err) {
       // The uploaded file is never persisted on failure (rule 2).
       return fail(400, { scanError: err.message });
@@ -79,7 +79,7 @@ export const actions = {
     const { version } = await loadVersion(user, params.id);
     const mrz = parseTD3(SPECIMEN.line1, SPECIMEN.line2);
     await applyScanToVersion(version.id, mrz, user.id);
-    return { scanOk: true, warnings: mrz.warnings, specimen: true };
+    return { scanOk: true, warnings: mrz.warnings, specimen: true, rawMrz: { line1: SPECIMEN.line1, line2: SPECIMEN.line2 } };
   },
 
   certifyName: async ({ request, locals, params }) => {
